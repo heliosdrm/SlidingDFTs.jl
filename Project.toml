@@ -1,0 +1,13 @@
+name = "SlidingDFTs"
+uuid = "1d200d82-9635-4b78-a1bf-580ee6384061"
+authors = ["Helios De Rosario"]
+version = "0.1.0"
+
+[compat]
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
