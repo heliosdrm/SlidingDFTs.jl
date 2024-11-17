@@ -1,5 +1,6 @@
 module SlidingDFTs
 
-# Write your package code here.
+include("interface.jl")
+include("SDFT.jl")
 
 end

@@ -14,6 +14,8 @@ makedocs(;
     ),
     pages=[
         "Home" => "index.md",
+        "Implementing SlidingDFTs" => "implement.md",
+        "API" => "api.md"
     ],
 )
 
