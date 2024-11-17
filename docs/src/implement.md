@@ -1,24 +1,28 @@
+```@meta
+CurrentModule = SlidingDFTs
+```
+
 # Impementing SlidingDFTs
 
  SlidingDFTs provides an interface to define new methods to compute Sliding Discrete Fourier Transforms (SDFT), which can be implemented in pull requests to this package, but also in independent packages.
 
 ## Theoretical basis
 
-A SDFT is generally implemented as a recursive equation, such that if $X_{i}[k]$ is the DFT of $x[j] for $j = i, \ldots, i+n$ at frequency $k$, the next iteration is:
+A SDFT is generally implemented as a recursive equation, such that if $X_{i}[k]$ is the DFT of $x[j]$ for $j = i, \ldots, i+n$ at frequency $k$, the next iteration is:
 
 $X_{i+1}[k] = f(X_{i}[k], X_{i-1}[k], \ldots, X_{1}[k], x[i], \ldots x[i+n], x[i+n+1])$
 
 Such an equation depends on:
 
 * The values of the DFT in one or more previous iterations, $X_{p}[k]$ for $p = 1, \ldots, i$.
-* The values of the data series used in the most recent iteration, $x[j] for j = i, \ldots, i+n$.
+* The values of the data series used in the most recent iteration, $x[j]$ for $j = i, \ldots, i+n$.
 * The next value of the data series after the fragment used in the most recent iteration, $x[i+n+1]$.
 
 For instance, the [basic definition of the SDFT](https://www.researchgate.net/publication/3321463_The_sliding_DFT) uses the following formula: 
 
-$X_{i+1}[k] = W[k] \cdot \(X_{i}[k] + x[i+n] - x[i]\),$
+$X_{i+1}[k] = W[k] \cdot (X_{i}[k] + x[i+n] - x[i]),$
 
-which depends only on the most recent DFT ($X_{i}[k]$), the first data point of the fragment used in that DFT ($x[i]$), and the next data point after that fragment ($x[i+n+1]$), plus a "twiddle" factor $W[k]$ that only depends on the frequency $k$, equal to $exp\(j2{\pi}k/n\)$.
+which depends only on the most recent DFT ($X_{i}[k]$), the first data point of the fragment used in that DFT ($x[i]$), and the next data point after that fragment ($x[i+n+1]$), plus a "twiddle" factor $W[k]$ that only depends on the frequency $k$, equal to $exp(j2{\pi}k/n)$.
 Other variations of the SDFT may use formulas that depend on previous iterations or other values of the data series in that fragment.
 
 ## Implementation in object types
@@ -35,7 +39,7 @@ The internals of SlidingDFTs take care of the design of the iterator and state t
 
 Before explaining how to define a new type for SDFTs, it is convenient to know the functions that can be used to extract the information that is stored in the state of SDFT iterators. There is a function for each of the three kinds of variables used in the general recursive equation presented above.
 
-```@docs
+```@docs; canonical=false
 previousdft
 previousdata
 nextdata
@@ -52,7 +56,7 @@ Notice that the third argument of `previousdft` and `previousdata` might have be
 
 The design of the `struct` representing a new SDFT type is free, but it is required to implement the following functions dispatching on that type:
 
-```@docs
+```@docs; canonical=false
 windowlength
 updatedft!
 ```
@@ -80,7 +84,7 @@ Notice that it was not necessary to use `previousdft` to retrieve the most recen
 
 Depending on the functions that are used in the particular implementation of `updatepdf!` for a given type, the following methods should be defined too:
 
-```@docs
+```@docs; canonical=false
 dataoffsets
 dftback
 ```

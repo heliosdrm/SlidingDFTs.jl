@@ -9,7 +9,7 @@ using AbstractFFTs
 
 Return the length of the window used by `method`.
 """
-function windowlenght end
+function windowlength end
 
 """
     updatedft!(dft, x, method, state)
@@ -74,7 +74,7 @@ struct SDFTIterator{M, T, S}
 end
 
 issafe(iterator::SDFTIterator) = iterator.safe
-statefultrait(iterator::statefulness) = iterator.statefulness
+statefultrait(iterator::SDFTIterator) = iterator.statefulness
 
 struct Stateless end
 struct Stateful end
@@ -131,3 +131,14 @@ in the range `i-back : i+n-back`.
 """
 function previousdft end
 
+"""
+    nextdata(state, x)
+
+Return the next value after the fragment of the data series `x` that was used
+in the most recent iteration of the sliding DFT represented by `state`.
+
+If the most recent iteration computed the DFT of the fragment of `x`
+corresponding to the range `i : i+n`, then this function returns
+the `i+n+1`-th value of `x`.
+"""
+function nextdata end
