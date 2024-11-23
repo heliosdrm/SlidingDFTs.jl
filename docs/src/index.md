@@ -17,6 +17,7 @@ The basic Sliding Discrete Fourier Transform (SDFT) of a one-dimensional series 
 
 ```julia
 using SlidingDFTs
+using FFTW # or another package implementing AbstractFFTs
 
 method = SDFT(n)
 ```
