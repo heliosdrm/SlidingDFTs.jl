@@ -14,9 +14,20 @@ function signal(x)
     end
 end
 
-@testset "SlidingDFTs.jl" begin
-    y = signal.(range(0, 3, length=61))
-    n = 15
-    method = SlidingDFTs.SDFT(n)
+y = signal.(range(0, 3, length=61))
+n = 20
+sample_offsets = (0, 20, 40)
+dfty_sample = [fft(view(y, (1:n) .+ offset)) for offset in sample_offsets]
+
+# Compare SDFT
+@testset "SDFT" begin
+    method = SDFT(n)
     dfty = collect(sdft(method, y))
+    @testset "stateless" for i in eachindex(sample_offsets)
+        @test dfty[1 + sample_offsets[i]] ≈ dfty_sample[i]
+    end
+    dfty = collect(stateful_sdft(method, y))
+    @testset "stateful" for i in eachindex(sample_offsets)
+        @test dfty[1 + sample_offsets[i]] ≈ dfty_sample[i]
+    end
 end
