@@ -1,4 +1,5 @@
 using AbstractFFTs
+import Base: iterate
 
 # exports
 
@@ -64,6 +65,147 @@ If that function is not needed, this one may return `nothing` to reduce memory a
 dftback(::Any) = nothing
 
 
+## States
+
+# State for a stateless data series
+struct SDFTState{T, DH, LS, FS, OS}
+    dft::Vector{Complex{T}}        # dft returned
+    dfthistory::DH                 # record of back dfts if needed, otherwise nothing
+    lastdatastate::LS              # state for the last position of the data fragment
+    firstdatastate::FS             # state for the first position of the data fragment - nothing in the first iteration
+    otherdatastates::OS            # Dict with states for other positions if needed, otherwise nothing
+    iteration::Int                 # number of the iteration
+end
+
+# State for a stateful data series
+struct SDFTStatefulState{T, DH, LS, D}
+    dft::Vector{Complex{T}}        # dft returned
+    dfthistory::DH                 # record of back dfts if needed, otherwise nothing
+    lastdatastate::LS              # state for the last position of the data fragment
+    datafragment::Vector{D}        # full record of the data fragment
+    iteration::Int                 # iteration
+end
+
+getdft(state) = state.dft
+getdfthistory(state) = state.dfthistory
+
+# State data used by `updatedft!`
+struct StateData{H, P, N}
+    dfthistory::H
+    previousdata::P
+    nextdatapoint::N
+    windowlength::Int
+    iteration::Int
+end
+
+hasdfthistory(::StateData{Nothing}) = false
+hasdfthistory(::StateData) = true
+haspreviousdata(::StateData{<:Any, Nothing}) = false
+haspreviousdata(::StateData) = true
+
+# Return the updated state of the iterator, or `nothing` if the data series is consumed.
+function updatestate(state::SDFTState, method, x) end
+
+function updatestate(state::SDFTStatefulState, method, x)
+    nextiter = iterate(x, state.lastdatastate)
+    if nextiter === nothing
+        return nothing
+    end
+    dft = getdft(state)
+    dfthistory = getdfthistory(state)
+    fragment = state.datafragment
+    nextdatapoint, nextdatastate = nextiter
+    n = windowlength(method)
+    statedata = StateData(dfthistory, fragment, nextdatapoint, n, state.iteration)
+    updatedft!(dft, x, method, statedata)
+    updatedfthistory!(dfthistory, dft, n, state.iteration)
+    updatefragment!(fragment, nextdatapoint, n, state.iteration)
+    return SDFTStatefulState(dft, dfthistory, nextdatastate, fragment, state.iteration + 1)
+end
+
+"""
+    previousdata(state[, offset=0])
+
+Return the first value of the fragment of the data series that was used
+in the most recent iteration of the sliding DFT represented by `state`,
+or at `offset` positions after the beginning of that fragment.
+
+If the most recent iteration computed the DFT of the fragment of a data series
+corresponding to the range `i : i+n`, then this function returns its `i+offset`-th value.
+"""
+function previousdata(state::StateData{<:Any, <:AbstractVector}, offset=0)
+    fragment = state.previousdata
+    adjustedoffset = rem(offset + state.iteration - 1, length(fragment))
+    return fragment[firstindex(fragment) + adjustedoffset]
+end
+
+function previousdata(state::StateData{<:Any, <:AbstractDict}, offset=0)
+    fragment = state.previousdata
+    return fragment[offset]
+end
+
+previousdata(::StateData{<:Any, Nothing}, args...) = throw(ExceptionError("define `dataoffsets` as something different to `nothing`"))
+
+"""
+    previousdft(state[, back=0])
+
+Return the DFT computed in the most recent iteration
+of the sliding DFT represented by `state`, or in a number of previous
+iterations equal to `back`.
+
+If the most recent iteration computed the DFT of the fragment of a data series
+corresponding to the range `i : i+n`, then this function returns its DFT
+for the range `i-back : i+n-back`.
+"""
+function previousdft(state::StateData, back=0)
+    !hasdfthistory(state) && throw(ExceptionError("define `dftback` as something different to `nothing`"))
+    dfthistory = state.dfthistory
+    n = state.windowlength
+    nh = length(dfthistory) ÷ n
+    offset = rem(state.iteration - back - 1, nh)
+    rg = (offset * n) .+ (1:n)
+    return view(dfthistory, rg)
+end
+
+
+"""
+    nextdata(state)
+
+Return the next value after the fragment of the data series that was used
+in the most recent iteration of the sliding DFT represented by `state`.
+
+If the most recent iteration computed the DFT of the fragment of a data series
+corresponding to the range `i : i+n`, then this function returns its `i+n+1`-th value.
+
+There is no defined behavior if such value does not exist
+(i.e. if the end of a finite data series was reached).
+"""
+nextdata(state::StateData) = state.nextdatapoint
+
+"""
+    iterationcount(state)
+
+Return the number of iterations done for the sliding DFT represented by `state`.
+
+If the most recent iteration computed the DFT of the fragment of `x`
+corresponding to the range `i : i+n`, then this function returns  the number `i`.
+"""
+iterationcount(state) = state.iteration
+
+function updatedfthistory!(dfthistory, dft, n, iteration)
+    offset = rem((iteration - 1) * n, length(dfthistory))
+    dfthistory[(1:n) .+ offset] .= dft
+end
+
+function updatedfthistory!(::Nothing, args...) end
+
+function updatefragment!(fragment, nextdatapoint, n, iteration)
+    offset = rem(iteration - 1, n)
+    fragment[1 + offset] = nextdatapoint
+end
+
+function updatefragment!(::Nothing, args...) end
+
 ## Iterators
 
 struct SDFTIterator{M, T, S}
@@ -73,8 +215,18 @@ struct SDFTIterator{M, T, S}
     statefulness::S
 end
 
+getmethod(iterator::SDFTIterator) = iterator.method
+getdata(iterator::SDFTIterator) = iterator.data
 issafe(iterator::SDFTIterator) = iterator.safe
 statefultrait(iterator::SDFTIterator) = iterator.statefulness
+
+function Base.length(iterator::SDFTIterator)
+    method = getmethod(iterator)
+    data = getdata(iterator)
+    return length(data) - windowlength(method) + 1
+end
+
+Base.eltype(::SDFTIterator{M,T,S}) where {M,T,S} = Vector{Complex{eltype(T)}}
 
 struct Stateless end
 struct Stateful end
@@ -90,7 +242,8 @@ at the expense of unexpected behavior if the resulting vector is mutated between
 
 It is assummed that `x` is a stateless iterator. To work with a stateful iterator, use `stateful_sdft`(@ref) instead.
 """
-sdft(method, x, safe=true) = SDFTIterator(method, x, safe, Stateless())
+# sdft(method, x, safe=true) = SDFTIterator(method, x, safe, Stateless())
+sdft(method, x, safe=true) = stateful_sdft(method, x, safe) # transitionally, work always as with stateful 
 
 """
     stateful_sdft(method, x[, safe=true])
@@ -102,43 +255,61 @@ See `sdft`(@ref) for more details.
 """
 stateful_sdft(method, x, safe=true) = SDFTIterator(method, x, safe, Stateful())
 
+function iterate(itr::SDFTIterator)
+    windowed_data, datastate = initialize(itr)
+    dft = fft(windowed_data)
+    method = getmethod(itr)
+    state = firststate(method, dft, windowed_data, datastate, statefultrait(itr))
+    returned_dft = itr.safe ? copy(dft) : dft
+    return returned_dft, state
+end
 
-## States
+function iterate(itr::SDFTIterator, state)
+    method = getmethod(itr)
+    x = getdata(itr)
+    newstate = updatestate(state, method, x)
+    if newstate === nothing
+        return nothing
+    end
+    dft = getdft(newstate)
+    returned_dft = itr.safe ? copy(dft) : dft
+    return returned_dft, newstate
+end
 
-"""
-    previousdata(state, x[, offset=0])
+# Helper functions
 
-Return the first value of the fragment of the data series `x` that was used
-in the most recent iteration of the sliding DFT represented by `state`,
-or at `offset` positions after the beginning of that fragment.
+# Get the window of the first chunk of data and the state of the data iterator at the end
+function initialize(itr)
+    x = getdata(itr)
+    firstiteration = iterate(x)
+    if firstiteration === nothing
+        throw(ExceptionError("insufficient data"))
+    end
+    datapoint, datastate = firstiteration
+    n = windowlength(getmethod(itr))
+    windowed_data = fill(datapoint, n)
+    i = 1
+    while i < n
+        i += 1
+        iteration = iterate(x, datastate)
+        if iteration === nothing
+            throw(ExceptionError("insufficent data"))
+        end
+        datapoint, datastate = iteration
+        windowed_data[i] = datapoint
+    end
+    return windowed_data, datastate
+end
 
-If the most recent iteration computed the DFT of the fragment of `x`
-corresponding to the range `i : i+n`, then this function returns
-the `i+offset`-th value of `x`.
-"""
-function previousdata end
+function firststate(method, dft, windowed_data, datastate, ::Stateless) end # TBD, return SDFTState
 
-"""
-    previousdft(state, x[, back=0])
+function firststate(method, dft, windowed_data, datastate, ::Stateful)
+    backindices = dftback(method)
+    dfthistory = create_dfthistory(dft, backindices)
+    return SDFTStatefulState(dft, dfthistory, datastate, windowed_data, 1)
+end
 
-Return the DFT computed in the most recent iteration
-of the sliding DFT represented by `state`, or in a number of previous
-iterations equal to `back`, using the input data `x`.
+create_dfthistory(::Any, ::Nothing) = nothing
+create_dfthistory(dft, n::Integer) = repeat(dft, n+1)
+create_dfthistory(dft, indices) = create_dfthistory(dft, maximum(indices))
 
-If the most recent iteration computed the DFT of the fragment of `x`
-corresponding to the range `i : i+n`, then this function returns the DFT of `x`
-in the range `i-back : i+n-back`.
-"""
-function previousdft end
-
-"""
-    nextdata(state, x)
-
-Return the next value after the fragment of the data series `x` that was used
-in the most recent iteration of the sliding DFT represented by `state`.
-
-If the most recent iteration computed the DFT of the fragment of `x`
-corresponding to the range `i : i+n`, then this function returns
-the `i+n+1`-th value of `x`.
-"""
-function nextdata end

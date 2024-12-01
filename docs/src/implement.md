@@ -27,7 +27,7 @@ Other variations of the SDFT may use formulas that depend on previous iterations
 
 ## Implementation in object types
 
-A method to compute an SDFT is defined by three object types:
+A method to compute an SDFT is defined by three kinds of object types:
 
 * One for the method, which contains the fixed parameters that are needed by the algorithm to compute the SDFT.
 * Another for the iterator created by the functions `sdft` or `stateful_sdft`, which binds a method with the target data series.
@@ -45,12 +45,18 @@ previousdata
 nextdata
 ```
 
-For instance, the values used in the formula of the basic SDFT may be obtained from a `state` object and its corresponding data series `x` as:
-* `SlidingDFTs.previousdft(state, x, 0)` for $X_{i}$.
-* `SlidingDFTs.previousdata(state, x, 0)` for $x[i]$.
-* `SlidingDFTs.nextdata(state, x)` for $x[i+n+1]$.
+For instance, the values used in the formula of the basic SDFT may be obtained from a `state` object as:
+* `SlidingDFTs.previousdft(state, 0)` for $X_{i}$.
+* `SlidingDFTs.previousdata(state, 0)` for $x[i]$.
+* `SlidingDFTs.nextdata(state)` for $x[i+n+1]$.
 
-Notice that the third argument of `previousdft` and `previousdata` might have been ommited in this case, since it is zero by default.
+Notice that the second argument of `previousdft` and `previousdata` might have been ommited in this case, since it is zero by default.
+
+For methods that need to know how many steps of the SDFT have been done, this can also be extracted:
+
+```@docs; canonical=false
+iterationcount
+```
 
 # Definition of new SDFT types
 
@@ -70,8 +76,8 @@ function udpatedft!(dft, x, method::MyBasicSDFT, state)
     n = windowlength(method)
     for k in eachindex(dft)
         X_i = dft[k]
-        x_iplusn = nextdata(state, x)
-        x_i = previousdata(state, x)
+        x_iplusn = nextdata(state)
+        x_i = previousdata(state)
         Wk = exp(2π*im*k/n)
         dft[k] = Wk * (X_i + x_iplusn - x_i)
     end

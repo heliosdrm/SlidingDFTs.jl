@@ -1,6 +1,6 @@
 using SlidingDFTs
 using Test
-using FFTW
+using RustFFT
 
 # Piecewise sinusoidal signal
 

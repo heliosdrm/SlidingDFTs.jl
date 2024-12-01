@@ -14,10 +14,10 @@ end
 
 windowlength(method::SDFT) = method.n
 
-function updatedft!(method::SDFT{T,C}) where {T,C}
+function updatedft!(dft, x, method::SDFT{T,C}, state) where {T,C}
     twiddle = one(C)
     for k in eachindex(dft)
-        dft[k] = twiddle * (dft[k] + nextdata(state, x) - previousdata(state, x))
+        dft[k] = twiddle * (dft[k] + nextdata(state) - previousdata(state))
         twiddle *= method.factor
     end
 end
