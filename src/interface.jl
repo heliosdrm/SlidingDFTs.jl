@@ -68,12 +68,11 @@ dftback(::Any) = nothing
 ## States
 
 # State for a stateless data series
-struct SDFTState{T, DH, LS, FS, OS}
+struct SDFTState{T, DH, LS, PS}
     dft::Vector{Complex{T}}        # dft returned
     dfthistory::DH                 # record of back dfts if needed, otherwise nothing
     lastdatastate::LS              # state for the last position of the data fragment
-    firstdatastate::FS             # state for the first position of the data fragment - nothing in the first iteration
-    otherdatastates::OS            # Dict with states for other positions if needed, otherwise nothing
+    previousdatastates::PS         # states for previous positions of the data fragment if needed, otherwise nothing
     iteration::Int                 # number of the iteration
 end
 
@@ -104,7 +103,34 @@ haspreviousdata(::StateData{<:Any, Nothing}) = false
 haspreviousdata(::StateData) = true
 
 # Return the updated state of the iterator, or `nothing` if the data series is consumed.
-function updatestate(state::SDFTState, method, x) end
+function updatestate(state::SDFTState, method, x)
+    nextiter = iterate(x, state.lastdatastate)
+    if nextiter === nothing
+        return nothing
+    end
+    dft = getdft(state)
+    dfthistory = getdfthistory(state)
+    previousstates, updatedstates = getpreviousdata(x, state.previousdatastates)
+    nextdatapoint, nextdatastate = nextiter
+    n = windowlength(method)
+    statedata = StateData(dfthistory, previousstates, nextdatapoint, n, state.iteration)
+    updatedft!(dft, x, method, statedata)
+    updatedfthistory!(dfthistory, dft, n, state.iteration)
+    return SDFTState(dft, dfthistory, nextdatastate, updatedstates, state.iteration + 1)
+end
+
+function getpreviousdata(x, states_dict)
+    previousdata = Dict{Int, eltype(x)}()
+    updatedstates = copy(states_dict)
+    for (i, state) in states_dict
+        value, state = iterate(x, state...)
+        previousdata[i] = value
+        updatedstates[i] = state
+    end
+    return previousdata, updatedstates
+end
+
+getpreviousdata(::Any, ::Nothing) = nothing, nothing
 
 function updatestate(state::SDFTStatefulState, method, x)
     nextiter = iterate(x, state.lastdatastate)
@@ -144,7 +170,7 @@ function previousdata(state::StateData{<:Any, <:AbstractDict}, offset=0)
     return fragment[offset]
 end
 
-previousdata(::StateData{<:Any, Nothing}, args...) = throw(ExceptionError("define `dataoffsets` as something different to `nothing`"))
+previousdata(::StateData{<:Any, Nothing}, args...) = throw(ErrorException("define `dataoffsets` as something different to `nothing`"))
 
 """
     previousdft(state[, back=0])
@@ -158,7 +184,7 @@ corresponding to the range `i : i+n`, then this function returns its DFT
 for the range `i-back : i+n-back`.
 """
 function previousdft(state::StateData, back=0)
-    !hasdfthistory(state) && throw(ExceptionError("define `dftback` as something different to `nothing`"))
+    !hasdfthistory(state) && throw(ErrorException("define `dftback` as something different to `nothing`"))
     dfthistory = state.dfthistory
     n = state.windowlength
     nh = length(dfthistory) ÷ n
@@ -242,8 +268,7 @@ at the expense of unexpected behavior if the resulting vector is mutated between
 
 It is assummed that `x` is a stateless iterator. To work with a stateful iterator, use `stateful_sdft`(@ref) instead.
 """
-# sdft(method, x, safe=true) = SDFTIterator(method, x, safe, Stateless())
-sdft(method, x, safe=true) = stateful_sdft(method, x, safe) # transitionally, work always as with stateful 
+sdft(method, x, safe=true) = SDFTIterator(method, x, safe, Stateless())
 
 """
     stateful_sdft(method, x[, safe=true])
@@ -256,10 +281,10 @@ See `sdft`(@ref) for more details.
 stateful_sdft(method, x, safe=true) = SDFTIterator(method, x, safe, Stateful())
 
 function iterate(itr::SDFTIterator)
-    windowed_data, datastate = initialize(itr)
+    windowed_data, previousstates, laststate = initialize(itr)
     dft = fft(windowed_data)
     method = getmethod(itr)
-    state = firststate(method, dft, windowed_data, datastate, statefultrait(itr))
+    state = firststate(method, dft, windowed_data, previousstates, laststate, statefultrait(itr))
     returned_dft = itr.safe ? copy(dft) : dft
     return returned_dft, state
 end
@@ -283,30 +308,47 @@ function initialize(itr)
     x = getdata(itr)
     firstiteration = iterate(x)
     if firstiteration === nothing
-        throw(ExceptionError("insufficient data"))
+        throw(ErrorException("insufficient data"))
     end
     datapoint, datastate = firstiteration
     n = windowlength(getmethod(itr))
     windowed_data = fill(datapoint, n)
+    offsetlist = dataoffsets(getmethod(itr))
+    previousstates = init_statedict(offsetlist, datastate)
     i = 1
     while i < n
-        i += 1
         iteration = iterate(x, datastate)
         if iteration === nothing
-            throw(ExceptionError("insufficent data"))
+            throw(ErrorException("insufficent data"))
         end
         datapoint, datastate = iteration
+        if i in offsetlist
+            update_statedict!(previousstates, i, datastate)
+        end
+        i += 1
         windowed_data[i] = datapoint
     end
-    return windowed_data, datastate
+    return windowed_data, previousstates, datastate
 end
 
-function firststate(method, dft, windowed_data, datastate, ::Stateless) end # TBD, return SDFTState
+init_statedict(::Nothing, ::Any) = nothing
+init_statedict(::Any, ::S) where S = Dict{Int, Union{S, Tuple{}, Nothing}}(0 => ())
 
-function firststate(method, dft, windowed_data, datastate, ::Stateful)
+function update_statedict!(::Nothing, ::Any, ::Any) end
+function update_statedict!(dict::AbstractDict, i, state)
+    dict[i] = state
+end
+
+function firststate(method, dft, ::Any, previousstates, laststate, ::Stateless)
     backindices = dftback(method)
     dfthistory = create_dfthistory(dft, backindices)
-    return SDFTStatefulState(dft, dfthistory, datastate, windowed_data, 1)
+    return SDFTState(dft, dfthistory, laststate, previousstates, 1)
+end
+
+function firststate(method, dft, windowed_data, ::Any, laststate, ::Stateful)
+    backindices = dftback(method)
+    dfthistory = create_dfthistory(dft, backindices)
+    return SDFTStatefulState(dft, dfthistory, laststate, windowed_data, 1)
 end
 
 create_dfthistory(::Any, ::Nothing) = nothing
