@@ -67,31 +67,10 @@ dftback(::Any) = nothing
 
 ## States
 
-# State for a stateless data series
-struct SDFTState{T, DH, LS, PS}
-    dft::Vector{Complex{T}}        # dft returned
-    dfthistory::DH                 # record of back dfts if needed, otherwise nothing
-    lastdatastate::LS              # state for the last position of the data fragment
-    previousdatastates::PS         # states for previous positions of the data fragment if needed, otherwise nothing
-    iteration::Int                 # number of the iteration
-end
-
-# State for a stateful data series
-struct SDFTStatefulState{T, DH, LS, D}
-    dft::Vector{Complex{T}}        # dft returned
-    dfthistory::DH                 # record of back dfts if needed, otherwise nothing
-    lastdatastate::LS              # state for the last position of the data fragment
-    datafragment::Vector{D}        # full record of the data fragment
-    iteration::Int                 # iteration
-end
-
-getdft(state) = state.dft
-getdfthistory(state) = state.dfthistory
-
 # State data used by `updatedft!`
-struct StateData{H, P, N}
+struct StateData{H, F, N}
     dfthistory::H
-    previousdata::P
+    fragment::F
     nextdatapoint::N
     windowlength::Int
     iteration::Int
@@ -101,53 +80,6 @@ hasdfthistory(::StateData{Nothing}) = false
 hasdfthistory(::StateData) = true
 haspreviousdata(::StateData{<:Any, Nothing}) = false
 haspreviousdata(::StateData) = true
-
-# Return the updated state of the iterator, or `nothing` if the data series is consumed.
-function updatestate(state::SDFTState, method, x)
-    nextiter = iterate(x, state.lastdatastate)
-    if nextiter === nothing
-        return nothing
-    end
-    dft = getdft(state)
-    dfthistory = getdfthistory(state)
-    previousstates, updatedstates = getpreviousdata(x, state.previousdatastates)
-    nextdatapoint, nextdatastate = nextiter
-    n = windowlength(method)
-    statedata = StateData(dfthistory, previousstates, nextdatapoint, n, state.iteration)
-    updatedft!(dft, x, method, statedata)
-    updatedfthistory!(dfthistory, dft, n, state.iteration)
-    return SDFTState(dft, dfthistory, nextdatastate, updatedstates, state.iteration + 1)
-end
-
-function getpreviousdata(x, states_dict)
-    previousdata = Dict{Int, eltype(x)}()
-    updatedstates = copy(states_dict)
-    for (i, state) in states_dict
-        value, state = iterate(x, state...)
-        previousdata[i] = value
-        updatedstates[i] = state
-    end
-    return previousdata, updatedstates
-end
-
-getpreviousdata(::Any, ::Nothing) = nothing, nothing
-
-function updatestate(state::SDFTStatefulState, method, x)
-    nextiter = iterate(x, state.lastdatastate)
-    if nextiter === nothing
-        return nothing
-    end
-    dft = getdft(state)
-    dfthistory = getdfthistory(state)
-    fragment = state.datafragment
-    nextdatapoint, nextdatastate = nextiter
-    n = windowlength(method)
-    statedata = StateData(dfthistory, fragment, nextdatapoint, n, state.iteration)
-    updatedft!(dft, x, method, statedata)
-    updatedfthistory!(dfthistory, dft, n, state.iteration)
-    updatefragment!(fragment, nextdatapoint, n, state.iteration)
-    return SDFTStatefulState(dft, dfthistory, nextdatastate, fragment, state.iteration + 1)
-end
 
 """
     previousdata(state[, offset=0])
@@ -159,18 +91,12 @@ or at `offset` positions after the beginning of that fragment.
 If the most recent iteration computed the DFT of the fragment of a data series
 corresponding to the range `i : i+n`, then this function returns its `i+offset`-th value.
 """
-function previousdata(state::StateData{<:Any, <:AbstractVector}, offset=0)
-    fragment = state.previousdata
+function previousdata(state::StateData, offset=0)
+    !haspreviousdata(state) && throw(ErrorException("define `dataoffsets` as something different to `nothing`"))
+    fragment = state.fragment
     adjustedoffset = rem(offset + state.iteration - 1, length(fragment))
     return fragment[firstindex(fragment) + adjustedoffset]
 end
-
-function previousdata(state::StateData{<:Any, <:AbstractDict}, offset=0)
-    fragment = state.previousdata
-    return fragment[offset]
-end
-
-previousdata(::StateData{<:Any, Nothing}, args...) = throw(ErrorException("define `dataoffsets` as something different to `nothing`"))
 
 """
     previousdft(state[, back=0])
@@ -218,6 +144,35 @@ corresponding to the range `i : i+n`, then this function returns  the number `i`
 """
 iterationcount(state) = state.iteration
 
+# State of the iterator
+struct SDFTState{T, H, FS, F, NS}
+    dft::Vector{Complex{T}}     # dft returned
+    dfthistory::H               # record of back dfts if needed, otherwise nothing
+    fragmentstate::FS           # state used to update the previous data fragment
+    fragment::F                 # previous data fragment used by the method
+    nextdatastate::NS           # state used to update the next data point
+    iteration::Int              # number of the iteration
+end
+
+# Return the updated state of the iterator, or `nothing` if the data series is consumed.
+function updatestate(state::SDFTState, method, x)
+    nextiter = iterate(x, state.nextdatastate)
+    if nextiter === nothing
+        return nothing
+    end
+    nextdatapoint, nextdatastate = nextiter
+    dft = state.dft
+    dfthistory = state.dfthistory
+    fragment = state.fragment
+    n = windowlength(method)
+    statedata = StateData(dfthistory, fragment, nextdatapoint, n, state.iteration)
+    updatedft!(dft, x, method, statedata)
+    updatedfthistory!(dfthistory, dft, n, state.iteration)
+    newdatapoint, updatedstate = getdatapoint(x, state.fragmentstate, nextdatapoint)
+    updatefragment!(fragment, newdatapoint, state.iteration)
+    return SDFTState(dft, dfthistory, updatedstate, fragment, nextdatastate, state.iteration + 1)
+end
+
 function updatedfthistory!(dfthistory, dft, n, iteration)
     offset = rem((iteration - 1) * n, length(dfthistory))
     dfthistory[(1:n) .+ offset] .= dft
@@ -225,12 +180,16 @@ end
 
 function updatedfthistory!(::Nothing, args...) end
 
-function updatefragment!(fragment, nextdatapoint, n, iteration)
+getdatapoint(x, state, ::Any) = iterate(x, state)
+getdatapoint(::Any, ::Nothing, nextdatapoint) = (nextdatapoint, nothing)
+
+function updatefragment!(fragment, nextdatapoint, iteration)
+    n = length(fragment)
     offset = rem(iteration - 1, n)
-    fragment[1 + offset] = nextdatapoint
+    fragment[begin + offset] = nextdatapoint
 end
 
-function updatefragment!(::Nothing, args...) end
+function updatefragment!(::Nothing, ::Any, ::Any) end
 
 ## Iterators
 
@@ -281,10 +240,18 @@ See `sdft`(@ref) for more details.
 stateful_sdft(method, x, safe=true) = SDFTIterator(method, x, safe, Stateful())
 
 function iterate(itr::SDFTIterator)
-    windowed_data, previousstates, laststate = initialize(itr)
+    windowed_data, fragmentstate, nextdatastate = initialize(itr)
     dft = fft(windowed_data)
     method = getmethod(itr)
-    state = firststate(method, dft, windowed_data, previousstates, laststate, statefultrait(itr))
+    backindices = dftback(method)
+    dfthistory = create_dfthistory(dft, backindices)
+    fragment = if statefultrait(itr) isa Stateful
+        windowed_data
+    else
+        n = maxoffset(dataoffsets(method))
+        windowed_data[begin .+ (0:n)]
+    end
+    state = SDFTState(dft, dfthistory, fragmentstate, fragment, nextdatastate, 1)
     returned_dft = itr.safe ? copy(dft) : dft
     return returned_dft, state
 end
@@ -296,7 +263,7 @@ function iterate(itr::SDFTIterator, state)
     if newstate === nothing
         return nothing
     end
-    dft = getdft(newstate)
+    dft = newstate.dft
     returned_dft = itr.safe ? copy(dft) : dft
     return returned_dft, newstate
 end
@@ -314,7 +281,8 @@ function initialize(itr)
     n = windowlength(getmethod(itr))
     windowed_data = fill(datapoint, n)
     offsetlist = dataoffsets(getmethod(itr))
-    previousstates = init_statedict(offsetlist, datastate)
+    m = maxoffset(offsetlist)
+    prevdatastate = statefultrait(itr) isa Stateless ? datastate : nothing
     i = 1
     while i < n
         iteration = iterate(x, datastate)
@@ -322,34 +290,17 @@ function initialize(itr)
             throw(ErrorException("insufficent data"))
         end
         datapoint, datastate = iteration
-        if i in offsetlist
-            update_statedict!(previousstates, i, datastate)
+        if i <= m
+            prevdatastate = statefultrait(itr) isa Stateless ? datastate : nothing
         end
         i += 1
         windowed_data[i] = datapoint
     end
-    return windowed_data, previousstates, datastate
+    return windowed_data, prevdatastate, datastate
 end
 
-init_statedict(::Nothing, ::Any) = nothing
-init_statedict(::Any, ::S) where S = Dict{Int, Union{S, Tuple{}, Nothing}}(0 => ())
-
-function update_statedict!(::Nothing, ::Any, ::Any) end
-function update_statedict!(dict::AbstractDict, i, state)
-    dict[i] = state
-end
-
-function firststate(method, dft, ::Any, previousstates, laststate, ::Stateless)
-    backindices = dftback(method)
-    dfthistory = create_dfthistory(dft, backindices)
-    return SDFTState(dft, dfthistory, laststate, previousstates, 1)
-end
-
-function firststate(method, dft, windowed_data, ::Any, laststate, ::Stateful)
-    backindices = dftback(method)
-    dfthistory = create_dfthistory(dft, backindices)
-    return SDFTStatefulState(dft, dfthistory, laststate, windowed_data, 1)
-end
+maxoffset(::Nothing) = 0
+maxoffset(offsetlist) = maximum(offsetlist)
 
 create_dfthistory(::Any, ::Nothing) = nothing
 create_dfthistory(dft, n::Integer) = repeat(dft, n+1)
