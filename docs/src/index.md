@@ -53,6 +53,6 @@ This iterator will produce only one vector that will be mutated at each iteratio
 
 ## Using SlidingDFTs with stateful iterators
 
-By default, this package computes sliding DFTs traversing sequentially the data series `x`, which can be any kind of iterator. In the case of stateful iterators (i.e. those that are modified upon each iteration, like `Base.Channel`s), that computation will "consume" as many items of `x` as the length of the computed DFT in the first iteration, and one additional item in every subsequent iteration.
+By default, this package computes sliding DFTs traversing sequentially the data series `x`, which can be any kind of iterator. In the case of stateful iterators (i.e. those that are modified upon each iteration, like `Base.Channel`s),  `sdft(method, x)` will also be a stateful iterator that will "consume" as many items of `x` as the length of the computed DFT in the first iteration, and one additional item in every subsequent iteration.
 
 Apart from that consideration, it is safe to apply sliding DFTs to stateful iterators, since past samples of `x` already used in previous iterations, which are often required for the computations, are temporarily stored in an array — in internal variables that users do not need to deal with.
