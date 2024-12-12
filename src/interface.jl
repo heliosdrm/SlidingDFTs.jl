@@ -206,6 +206,10 @@ getmethod(iterator::SDFTIterator) = iterator.method
 getdata(iterator::SDFTIterator) = iterator.data
 issafe(iterator::SDFTIterator) = iterator.safe
 
+Base.IteratorSize(::SDFTIterator{<:Any,T}) where T = IteratorSizeWrapper(Base.IteratorSize(T))
+IteratorSizeWrapper(::Base.HasShape) = Base.HasLength() # do not inherit shape
+IteratorSizeWrapper(iteratorsizetrait) = iteratorsizetrait # inherit everything else
+
 function Base.length(iterator::SDFTIterator)
     method = getmethod(iterator)
     data = getdata(iterator)
@@ -213,6 +217,9 @@ function Base.length(iterator::SDFTIterator)
 end
 
 Base.eltype(::SDFTIterator{M,T}) where {M,T} = Vector{Complex{eltype(T)}}
+
+Base.isdone(iterator::SDFTIterator) = Base.isdone(getdata(iterator))
+Base.isdone(iterator::SDFTIterator, state::SDFTState) = Base.isdone(getdata(iterator), state.nextdatastate)
 
 """
     sdft(method, x[, safe=true])
