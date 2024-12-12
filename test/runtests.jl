@@ -26,7 +26,7 @@ dfty_sample = [fft(view(y, (1:n) .+ offset)) for offset in sample_offsets]
     @testset "stateless" for i in eachindex(sample_offsets)
         @test dfty[1 + sample_offsets[i]] ≈ dfty_sample[i]
     end
-    dfty = collect(stateful_sdft(method, y))
+    dfty = collect(sdft(method, Iterators.Stateful(y)))
     @testset "stateful" for i in eachindex(sample_offsets)
         @test dfty[1 + sample_offsets[i]] ≈ dfty_sample[i]
     end

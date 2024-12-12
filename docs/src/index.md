@@ -5,11 +5,11 @@ CurrentModule = SlidingDFTs
 # SlidingDFTs
 
 [SlidingDFTs](https://github.com/heliosdrm/SlidingDFTs.jl) is a Julia package to compute
-[Sliding Discrete Fourer Transforms](https://en.wikipedia.org/wiki/Sliding_DFT) recursively, on one-dimensional series of values.
+[Sliding Discrete Fourer Transforms](https://en.wikipedia.org/wiki/Sliding_DFT) recursively, over one-dimensional series of values.
 
 ## Basic usage
 
-This package must be used with some implementation of [AbstractFFTs.jl](https://github.com/JuliaMath/AbstractFFTs.jl/) such as [FFTW.jl](https://github.com/JuliaMath/FFTW.jl) or [FastTransforms.jl](https://github.com/JuliaApproximation/FastTransforms.jl).
+This package must be used with some implementation of [AbstractFFTs](https://github.com/JuliaMath/AbstractFFTs.jl/) such as [FFTW](https://github.com/JuliaMath/FFTW.jl), [FastTransforms](https://github.com/JuliaApproximation/FastTransforms.jl) or [RustFFT](https://github.com/Taaitaaiger/RustFFT.jl).
 
 The basic Sliding Discrete Fourier Transform (SDFT) of a one-dimensional series of values `x`, using a window of length `n`, is calculated as follows:
 
@@ -42,8 +42,8 @@ iterator = sdft(method, x, safe=false)
 
 This iterator will produce only one vector that will be mutated at each iteration. Use this with caution, as any modification of the resulting vector may lead to unexpected results in subsequent iterations.
 
-## Sliding DFTs for stateful iterators
+## Using SlidingDFTs with stateful iterators
 
-The data series `x` over which sliding DFTs are computed can be any kind of iterator, but most methods require reusing past samples of the data, so `sdft` assumes that `x` is a "stateless" iterator (i.e. it is not altered by iterating over it, so there may be simultaneous loops traversing it without interfering with each other).
+By default, this package computes sliding DFTs traversing sequentially the data series `x`, which can be any kind of iterator. In the case of stateful iterators (i.e. those that are modified upon each iteration, like `Base.Channel`s), that computation will "consume" as many items of `x` as the length of the computed DFT in the first iteration, and one additional item in every subsequent iteration.
 
-That is usually the case in Julia, but if it is not, e.g. in the case of `Base.Channel`s, it is possible to use `stateful_sdft` instead of `sdft`. This will traverse the input `x` only once, storing past values internally to reuse them when needed, at the expense of additional memory allocations.
+Apart from that consideration, it is safe to apply sliding DFTs to stateful iterators, since past samples of `x` already used in previous iterations, which are often required for the computations, are temporarily stored in an array — in internal variables that users do not need to deal with.
