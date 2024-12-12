@@ -7,6 +7,15 @@ CurrentModule = SlidingDFTs
 [SlidingDFTs](https://github.com/heliosdrm/SlidingDFTs.jl) is a Julia package to compute
 [Sliding Discrete Fourer Transforms](https://en.wikipedia.org/wiki/Sliding_DFT) recursively, over one-dimensional series of values.
 
+## Installation
+
+This package is not yet registered. Add it with `]add https://github.com/heliosdrm/SlidingDFTs.jl` in the "pkg mode" of the REPL, or in the "standard REPL":
+
+```julia
+using Pkg
+Pkg.add("https://github.com/heliosdrm/SlidingDFTs.jl")
+```
+
 ## Basic usage
 
 This package must be used with some implementation of [AbstractFFTs](https://github.com/JuliaMath/AbstractFFTs.jl/) such as [FFTW](https://github.com/JuliaMath/FFTW.jl), [FastTransforms](https://github.com/JuliaApproximation/FastTransforms.jl) or [RustFFT](https://github.com/Taaitaaiger/RustFFT.jl).
