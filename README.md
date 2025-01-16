@@ -1,3 +1,6 @@
+> [!NOTE]
+> This package is not maintained. Its functionality has been transferred to the registered package [FourierTools](https://github.com/bionanoimaging/FourierTools.jl)
+
 # SlidingDFTs
 
 A Julia package to compute [Sliding Discrete Fourer Transforms](https://en.wikipedia.org/wiki/Sliding_DFT) recursively, over one-dimensional series of values.
